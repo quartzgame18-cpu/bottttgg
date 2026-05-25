@@ -12,7 +12,6 @@ complaints = {}
 complaint_id = 0
 admin_reply_to = {}
 
-# вакансии
 VAC_MEDIA = True
 VAC_STAJ = True
 
@@ -76,7 +75,7 @@ def vac(m):
         ))
 
     if not VAC_MEDIA and not VAC_STAJ:
-        bot.send_message(m.chat.id, "❌ Вакансии временно закрыты")
+        bot.send_message(m.chat.id, "❌ Вакансии закрыты")
         return
 
     bot.send_message(m.chat.id, "Вакансии:", reply_markup=kb)
@@ -103,16 +102,16 @@ def c_start(m):
     bot.send_message(m.chat.id, "Введите ваш Ник:")
 
 
-# ---------------- TEXT HANDLER ----------------
+# ---------------- TEXT ----------------
 @bot.message_handler(content_types=["text"])
 def text(m):
     uid = m.from_user.id
 
-    # ADMIN ANSWER
+    # admin reply
     if uid == ADMIN_ID and uid in admin_reply_to:
         user_id = admin_reply_to[uid]
         bot.send_message(user_id, "Ответ от администрации:\n" + m.text)
-        bot.send_message(uid, "Ответ отправлен.")
+        bot.send_message(uid, "Ответ отправлен ✔")
         del admin_reply_to[uid]
         return
 
@@ -121,65 +120,60 @@ def text(m):
 
     s = state[uid]
 
-    # -------- QUESTION --------
+    # QUESTION
     if s["type"] == "question":
-
         if s["step"] == 1:
             s["nick"] = m.text
             s["step"] = 2
-            bot.send_message(uid, "Введите ваш вопрос:")
+            bot.send_message(uid, "Введите вопрос:")
             return
 
         if s["step"] == 2:
             s["question"] = m.text
 
-            bot.send_message(uid, "Вопрос передан руководству.")
+            bot.send_message(uid, "Вопрос отправлен.")
 
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("Ответить", callback_data=f"ans_{uid}"))
 
             bot.send_message(
                 ADMIN_ID,
-                "НОВЫЙ ВОПРОС\n\nНик: " + s["nick"] + "\nВопрос: " + s["question"],
+                f"НОВЫЙ ВОПРОС\nНик: {s['nick']}\nВопрос: {s['question']}",
                 reply_markup=kb
             )
 
             del state[uid]
             return
 
-    # -------- BUG --------
+    # BUG
     if s["type"] == "bug":
-
         if s["step"] == 1:
             s["nick"] = m.text
             s["step"] = 2
-            bot.send_message(uid, "Найденный баг:")
+            bot.send_message(uid, "Баг:")
             return
 
         if s["step"] == 2:
             s["bug"] = m.text
             s["step"] = 3
-            bot.send_message(uid, "Как вы его спровоцировали:")
+            bot.send_message(uid, "Как воспроизвести:")
             return
 
         if s["step"] == 3:
             s["how"] = m.text
 
-            bot.send_message(uid, "Баг передан руководству.")
+            bot.send_message(uid, "Баг отправлен.")
 
             bot.send_message(
                 ADMIN_ID,
-                "НОВЫЙ БАГ\n\nНик: " + s["nick"] +
-                "\nБаг: " + s["bug"] +
-                "\nКак: " + s["how"]
+                f"НОВЫЙ БАГ\nНик: {s['nick']}\nБаг: {s['bug']}\nКак: {s['how']}"
             )
 
             del state[uid]
             return
 
-    # -------- COMPLAINT --------
+    # COMPLAINT TEXT
     if s["type"] == "complaint":
-
         if s["step"] == 1:
             s["nick"] = m.text
             s["step"] = 2
@@ -189,13 +183,13 @@ def text(m):
         if s["step"] == 2:
             s["target"] = m.text
             s["step"] = 3
-            bot.send_message(uid, "Его нарушение:")
+            bot.send_message(uid, "Нарушение:")
             return
 
         if s["step"] == 3:
             s["violation"] = m.text
             s["step"] = 4
-            bot.send_message(uid, "Прикрепите фото или видео:")
+            bot.send_message(uid, "Пришлите фото или видео:")
             return
 
 
@@ -213,7 +207,7 @@ def media(m):
         return
 
     if s.get("step") != 4:
-        bot.send_message(uid, "Сначала заполните все поля жалобы.")
+        bot.send_message(uid, "Сначала заполните жалобу.")
         return
 
     global complaint_id
@@ -221,10 +215,8 @@ def media(m):
 
     if m.content_type == "photo":
         file_id = m.photo[-1].file_id
-        mtype = "photo"
     else:
         file_id = m.video.file_id
-        mtype = "video"
 
     complaints[complaint_id] = {
         "uid": uid,
@@ -232,7 +224,7 @@ def media(m):
         "target": s["target"],
         "violation": s["violation"],
         "file_id": file_id,
-        "type": mtype
+        "type": m.content_type
     }
 
     kb = types.InlineKeyboardMarkup()
@@ -242,49 +234,54 @@ def media(m):
     )
 
     text = (
-        "ЖАЛОБА #" + str(complaint_id) +
-        "\nНик: " + s["nick"] +
-        "\nИгрок: " + s["target"] +
-        "\nНарушение: " + s["violation"]
+        f"ЖАЛОБА #{complaint_id}\n"
+        f"Ник: {s['nick']}\n"
+        f"Игрок: {s['target']}\n"
+        f"Нарушение: {s['violation']}"
     )
 
-    if mtype == "photo":
+    if m.content_type == "photo":
         bot.send_photo(ADMIN_ID, file_id, caption=text, reply_markup=kb)
     else:
         bot.send_video(ADMIN_ID, file_id, caption=text, reply_markup=kb)
 
     bot.send_message(uid, "Жалоба отправлена.")
-
     del state[uid]
 
 
 # ---------------- CALLBACKS ----------------
 @bot.callback_query_handler(func=lambda call: True)
 def cb(call):
+    bot.answer_callback_query(call.id, "Готово ✔")
+
     data = call.data
 
-    # answer question
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    global VAC_MEDIA, VAC_STAJ
+
+    if data == "st_on":
+        VAC_STAJ = True
+        bot.send_message(call.message.chat.id, "🟢 Стажёр открыт")
+
+    if data == "st_off":
+        VAC_STAJ = False
+        bot.send_message(call.message.chat.id, "🔴 Стажёр закрыт")
+
+    if data == "md_on":
+        VAC_MEDIA = True
+        bot.send_message(call.message.chat.id, "🟢 Медиа открыто")
+
+    if data == "md_off":
+        VAC_MEDIA = False
+        bot.send_message(call.message.chat.id, "🔴 Медиа закрыто")
+
+    # question answer
     if data.startswith("ans_"):
         uid = int(data.split("_")[1])
         admin_reply_to[call.from_user.id] = uid
         bot.send_message(call.from_user.id, "Введите ответ:")
-        return
-
-    # complaint accept
-    if data.startswith("ok_"):
-        cid = int(data.split("_")[1])
-        comp = complaints[cid]
-        bot.send_message(comp["uid"], "Ваша жалоба одобрена.")
-        bot.send_message(call.message.chat.id, "Жалоба принята.")
-        return
-
-    # complaint reject
-    if data.startswith("no_"):
-        cid = int(data.split("_")[1])
-        comp = complaints[cid]
-        bot.send_message(comp["uid"], "Ваша жалоба отклонена.")
-        bot.send_message(call.message.chat.id, "Жалоба отклонена.")
-        return
 
 
 bot.polling(none_stop=True)

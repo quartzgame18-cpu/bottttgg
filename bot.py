@@ -3,7 +3,9 @@ from telebot import types
 import os
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+
+# 👇 2+ админа через ENV
+ADMINS = list(map(int, os.getenv("ADMINS").split(",")))
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -24,7 +26,7 @@ def menu(user_id):
     kb.add("Открытые вакансии")
     kb.add("Жалоба на игрока")
 
-    if user_id == ADMIN_ID:
+    if user_id in ADMINS:
         kb.add("Админ панель")
 
     return kb
@@ -50,7 +52,7 @@ def admin_panel_kb():
 
 @bot.message_handler(func=lambda m: m.text == "Админ панель")
 def admin_panel(m):
-    if m.from_user.id != ADMIN_ID:
+    if m.from_user.id not in ADMINS:
         return
 
     bot.send_message(m.chat.id, "⚙️ Админ панель:", reply_markup=admin_panel_kb())
@@ -81,7 +83,7 @@ def vac(m):
     bot.send_message(m.chat.id, "Вакансии:", reply_markup=kb)
 
 
-# ---------------- QUESTION ----------------
+# ---------------- QUESTIONS ----------------
 @bot.message_handler(func=lambda m: m.text == "Вопрос")
 def q_start(m):
     state[m.from_user.id] = {"type": "question", "step": 1}
@@ -102,13 +104,13 @@ def c_start(m):
     bot.send_message(m.chat.id, "Введите ваш Ник:")
 
 
-# ---------------- TEXT ----------------
+# ---------------- TEXT FLOW ----------------
 @bot.message_handler(content_types=["text"])
 def text(m):
     uid = m.from_user.id
 
-    # admin reply
-    if uid == ADMIN_ID and uid in admin_reply_to:
+    # admin answer
+    if uid in ADMINS and uid in admin_reply_to:
         user_id = admin_reply_to[uid]
         bot.send_message(user_id, "Ответ от администрации:\n" + m.text)
         bot.send_message(uid, "Ответ отправлен ✔")
@@ -131,17 +133,15 @@ def text(m):
         if s["step"] == 2:
             s["question"] = m.text
 
-            bot.send_message(uid, "Вопрос отправлен.")
-
             kb = types.InlineKeyboardMarkup()
             kb.add(types.InlineKeyboardButton("Ответить", callback_data=f"ans_{uid}"))
 
-            bot.send_message(
-                ADMIN_ID,
-                f"НОВЫЙ ВОПРОС\nНик: {s['nick']}\nВопрос: {s['question']}",
-                reply_markup=kb
-            )
+            text_msg = f"НОВЫЙ ВОПРОС\nНик: {s['nick']}\nВопрос: {s['question']}"
 
+            for admin_id in ADMINS:
+                bot.send_message(admin_id, text_msg, reply_markup=kb)
+
+            bot.send_message(uid, "Вопрос отправлен.")
             del state[uid]
             return
 
@@ -162,17 +162,16 @@ def text(m):
         if s["step"] == 3:
             s["how"] = m.text
 
+            text_msg = f"НОВЫЙ БАГ\nНик: {s['nick']}\nБаг: {s['bug']}\nКак: {s['how']}"
+
+            for admin_id in ADMINS:
+                bot.send_message(admin_id, text_msg)
+
             bot.send_message(uid, "Баг отправлен.")
-
-            bot.send_message(
-                ADMIN_ID,
-                f"НОВЫЙ БАГ\nНик: {s['nick']}\nБаг: {s['bug']}\nКак: {s['how']}"
-            )
-
             del state[uid]
             return
 
-    # COMPLAINT TEXT
+    # COMPLAINT FLOW
     if s["type"] == "complaint":
         if s["step"] == 1:
             s["nick"] = m.text
@@ -218,32 +217,24 @@ def media(m):
     else:
         file_id = m.video.file_id
 
-    complaints[complaint_id] = {
-        "uid": uid,
-        "nick": s["nick"],
-        "target": s["target"],
-        "violation": s["violation"],
-        "file_id": file_id,
-        "type": m.content_type
-    }
-
     kb = types.InlineKeyboardMarkup()
     kb.add(
         types.InlineKeyboardButton("Принять", callback_data=f"ok_{complaint_id}"),
         types.InlineKeyboardButton("Отклонить", callback_data=f"no_{complaint_id}")
     )
 
-    text = (
+    text_msg = (
         f"ЖАЛОБА #{complaint_id}\n"
         f"Ник: {s['nick']}\n"
         f"Игрок: {s['target']}\n"
         f"Нарушение: {s['violation']}"
     )
 
-    if m.content_type == "photo":
-        bot.send_photo(ADMIN_ID, file_id, caption=text, reply_markup=kb)
-    else:
-        bot.send_video(ADMIN_ID, file_id, caption=text, reply_markup=kb)
+    for admin_id in ADMINS:
+        if m.content_type == "photo":
+            bot.send_photo(admin_id, file_id, caption=text_msg, reply_markup=kb)
+        else:
+            bot.send_video(admin_id, file_id, caption=text_msg, reply_markup=kb)
 
     bot.send_message(uid, "Жалоба отправлена.")
     del state[uid]
@@ -256,7 +247,7 @@ def cb(call):
 
     data = call.data
 
-    if call.from_user.id != ADMIN_ID:
+    if call.from_user.id not in ADMINS:
         return
 
     global VAC_MEDIA, VAC_STAJ
@@ -277,11 +268,10 @@ def cb(call):
         VAC_MEDIA = False
         bot.send_message(call.message.chat.id, "🔴 Медиа закрыто")
 
-    # question answer
     if data.startswith("ans_"):
         uid = int(data.split("_")[1])
         admin_reply_to[call.from_user.id] = uid
         bot.send_message(call.from_user.id, "Введите ответ:")
 
 
-bot.polling(none_stop=True)
+bot.infinity_polling(timeout=30, long_polling_timeout=20)
